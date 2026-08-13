@@ -212,7 +212,13 @@ export async function runAutonomousSupervisor() {
       });
 
       const forecasts = forecast90Days(signal);
-      const score = scoreOpportunity(signal, forecasts);
+      const score = scoreOpportunity(signal, forecasts, {
+        weights: config.score_weights,
+        promotionThreshold: Number(config.promotion_threshold ?? 72),
+        watchThreshold: Number(config.watch_threshold ?? 55),
+        minConfidence: Number(config.min_confidence ?? 0.55),
+        maxDeliveryDays: Number(config.max_delivery_days ?? 10),
+      });
       candidates.push({
         raw,
         productId: externalId,
@@ -295,7 +301,7 @@ export async function runAutonomousSupervisor() {
           warehouse_country: candidate.warehouseCountry ?? null,
           components: candidate.score.components,
         },
-        scoring_version: 'score-v1.1',
+        scoring_version: 'score-v1.2',
       });
 
       await supabase.from('agent_decisions').insert({
