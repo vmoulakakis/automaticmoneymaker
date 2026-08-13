@@ -1,5 +1,25 @@
 import { createClient } from '@supabase/supabase-js';
 
+const APP_TABLES = new Set([
+  'products',
+  'product_observations',
+  'demand_features',
+  'forecasts',
+  'opportunity_scores',
+  'agent_runs',
+  'agent_decisions',
+  'system_config',
+]);
+
+function withAutomaticMoneyMakerTables<T extends ReturnType<typeof createClient>>(client: T): T {
+  const originalFrom = client.from.bind(client);
+
+  (client as any).from = (relation: string) =>
+    originalFrom(APP_TABLES.has(relation) ? `amm_${relation}` : relation);
+
+  return client;
+}
+
 export function createServerSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -8,9 +28,9 @@ export function createServerSupabase() {
     throw new Error('Missing Supabase server environment variables');
   }
 
-  return createClient(url, serviceRoleKey, {
+  return withAutomaticMoneyMakerTables(createClient(url, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
-  });
+  }));
 }
 
 export function createBrowserSupabase() {
@@ -21,5 +41,5 @@ export function createBrowserSupabase() {
     throw new Error('Missing Supabase browser environment variables');
   }
 
-  return createClient(url, publishableKey);
+  return withAutomaticMoneyMakerTables(createClient(url, publishableKey));
 }
