@@ -27,15 +27,22 @@ export async function saveConfiguration(form: FormData) {
   const total = Object.values(weights).reduce((sum, value) => sum + value, 0);
   if (Math.abs(total - 1) > 0.001) throw new Error(`Score weights must total 1. Current total: ${total.toFixed(3)}`);
 
+  const promotionThreshold = number(form, 'promotion_threshold', 72);
+  const watchThreshold = number(form, 'watch_threshold', 55);
+  if (watchThreshold > promotionThreshold) throw new Error('WATCH threshold cannot be greater than PROMOTE threshold.');
+
   const values: Record<string, unknown> = {
     score_weights: weights,
-    promotion_threshold: number(form, 'promotion_threshold', 72),
-    watch_threshold: number(form, 'watch_threshold', 55),
+    promotion_threshold: promotionThreshold,
+    watch_threshold: watchThreshold,
     min_confidence: number(form, 'min_confidence', 0.55),
     max_delivery_days: number(form, 'max_delivery_days', 10),
     discovery_delivery_days: number(form, 'discovery_delivery_days', 10),
     max_discovery_pages: number(form, 'max_discovery_pages', 3),
     max_eu_verifications_per_run: number(form, 'max_eu_verifications_per_run', 12),
+    min_history_points_for_promotion: number(form, 'min_history_points_for_promotion', 4),
+    min_history_span_hours_for_promotion: number(form, 'min_history_span_hours_for_promotion', 24),
+    eu_verification_ttl_hours: number(form, 'eu_verification_ttl_hours', 24),
     allowed_warehouse_countries: list(form, 'allowed_warehouse_countries').map((value) => value.toUpperCase()),
     discovery_keywords: list(form, 'discovery_keywords'),
     discovery_category_ids: list(form, 'discovery_category_ids'),
