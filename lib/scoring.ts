@@ -18,9 +18,9 @@ export function scoreOpportunity(
 ): OpportunityResult {
   const f30 = forecasts.find((f) => f.horizonDays === 30)!;
   const f90 = forecasts.find((f) => f.horizonDays === 90)!;
-  const baseline30 = Math.max(1, signal.currentOrders - signal.orders30dAgo);
+  const baseline30 = Math.max(1, signal.currentDemand30);
 
-  const demand = clamp((Math.log10(Math.max(1, signal.currentOrders)) / 4) * 100);
+  const demand = clamp((Math.log10(Math.max(1, baseline30)) / 3.3) * 100);
   const forecast = clamp((f90.forecastDemand / Math.max(1, baseline30 * 3)) * 70 + signal.trendScore * 30);
   const margin = clamp(signal.commissionRate * 550);
   const competition = clamp((1 - signal.competitionScore) * 100);
@@ -45,6 +45,10 @@ export function scoreOpportunity(
   if (signal.commissionRate < 0.03) {
     riskPenalty += 10;
     reasonCodes.push('LOW_COMMISSION');
+  }
+  if (signal.historyPoints < 3) {
+    riskPenalty += 8;
+    reasonCodes.push('THIN_HISTORY');
   }
 
   const weighted =
