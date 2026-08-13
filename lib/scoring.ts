@@ -17,6 +17,7 @@ export type ScoringOptions = {
   watchThreshold?: number;
   minConfidence?: number;
   maxDeliveryDays?: number;
+  minHistoryPoints?: number;
 };
 
 export function scoreOpportunity(
@@ -29,6 +30,7 @@ export function scoreOpportunity(
   const watchThreshold = options.watchThreshold ?? 55;
   const minConfidence = options.minConfidence ?? 0.55;
   const maxDeliveryDays = options.maxDeliveryDays ?? 10;
+  const minHistoryPoints = Math.max(2, options.minHistoryPoints ?? 4);
 
   const f30 = forecasts.find((f) => f.horizonDays === 30)!;
   const f90 = forecasts.find((f) => f.horizonDays === 90)!;
@@ -60,9 +62,11 @@ export function scoreOpportunity(
     riskPenalty += 10;
     reasonCodes.push('LOW_COMMISSION');
   }
-  if (signal.historyPoints < 3) {
-    riskPenalty += 8;
-    reasonCodes.push('THIN_HISTORY');
+
+  const historyReady = signal.historyPoints >= minHistoryPoints;
+  if (!historyReady) {
+    riskPenalty += 12;
+    reasonCodes.push('INSUFFICIENT_ROLLING_HISTORY');
   }
 
   const weighted =
@@ -74,7 +78,7 @@ export function scoreOpportunity(
     confidence * weights.confidence;
 
   const totalScore = Number(clamp(weighted - riskPenalty).toFixed(2));
-  const recommendedAction = totalScore >= promotionThreshold && riskPenalty < 25
+  const recommendedAction = historyReady && totalScore >= promotionThreshold && riskPenalty < 25
     ? 'PROMOTE'
     : totalScore >= watchThreshold
       ? 'WATCH'
