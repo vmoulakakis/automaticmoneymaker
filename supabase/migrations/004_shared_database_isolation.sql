@@ -31,12 +31,3 @@ begin
   end if;
 end
 $$;
-
--- Cover run foreign keys used by audit/history queries.
-create index if not exists amm_forecasts_run_id_idx
-  on public.amm_forecasts(run_id)
-  where run_id is not null;
-
-create index if not exists amm_opportunity_scores_run_id_idx
-  on public.amm_opportunity_scores(run_id)
-  where run_id is not null;
