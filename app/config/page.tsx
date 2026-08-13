@@ -15,7 +15,7 @@ export default async function ConfigurationPage() {
         <div>
           <div className="kicker">Control plane</div>
           <h1>Configure the autonomous system.</h1>
-          <p className="lead">Tune how aggressively the engine explores, how strict EU-stock verification is, and how opportunity scoring balances demand, forecast, margin, competition, fulfilment and confidence.</p>
+          <p className="lead">Tune exploration, demand-model maturity, EU-stock verification freshness, and how opportunity scoring balances demand, forecast, margin, competition, fulfilment and confidence.</p>
         </div>
       </section>
 
@@ -27,6 +27,7 @@ export default async function ConfigurationPage() {
             <label>EU verifications per run<input name="max_eu_verifications_per_run" type="number" min="0" max="50" defaultValue={Number(config.max_eu_verifications_per_run ?? 12)} /></label>
             <label>Fast-delivery filter (days)<select name="discovery_delivery_days" defaultValue={String(config.discovery_delivery_days ?? 10)}><option value="3">3</option><option value="5">5</option><option value="7">7</option><option value="10">10</option></select></label>
             <label>Max acceptable delivery days<input name="max_delivery_days" type="number" min="1" max="30" defaultValue={Number(config.max_delivery_days ?? 10)} /></label>
+            <label>EU verification freshness (hours)<input name="eu_verification_ttl_hours" type="number" min="1" max="168" defaultValue={Number(config.eu_verification_ttl_hours ?? 24)} /></label>
             <label>Allowed EU warehouse country codes<textarea name="allowed_warehouse_countries" defaultValue={(config.allowed_warehouse_countries ?? ['ES','FR','DE','IT','PL','CZ','BE','NL']).join(', ')} /></label>
             <label>Optional discovery keywords<textarea name="discovery_keywords" placeholder="portable monitor, smart home..." defaultValue={(config.discovery_keywords ?? []).join(', ')} /></label>
             <label>Optional AliExpress category IDs<textarea name="discovery_category_ids" placeholder="200001100, 200003482..." defaultValue={(config.discovery_category_ids ?? []).join(', ')} /></label>
@@ -34,6 +35,14 @@ export default async function ConfigurationPage() {
               <label><span><input name="autonomous_mode" type="checkbox" defaultChecked={config.autonomous_mode !== false} style={{ width: 'auto', marginRight: 8 }} />Autonomous mode</span></label>
               <label><span><input name="require_verified_eu_stock" type="checkbox" defaultChecked={config.require_verified_eu_stock !== false} style={{ width: 'auto', marginRight: 8 }} />Require verified EU stock for PROMOTE</span></label>
             </div>
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="section-title"><h2>Forecast maturity gates</h2><span className="muted">Prevent false confidence from thin history</span></div>
+          <div className="form-grid">
+            <label>Minimum rolling observations<input name="min_history_points_for_promotion" type="number" min="2" max="100" defaultValue={Number(config.min_history_points_for_promotion ?? 4)} /></label>
+            <label>Minimum history span (hours)<input name="min_history_span_hours_for_promotion" type="number" min="0" max="720" defaultValue={Number(config.min_history_span_hours_for_promotion ?? 24)} /></label>
           </div>
         </section>
 
