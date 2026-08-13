@@ -1,10 +1,11 @@
 export type ProductSignal = {
   productId: string;
-  currentOrders: number;
-  orders7dAgo: number;
-  orders30dAgo: number;
+  currentDemand30: number;
+  demand7dAgo?: number;
+  demand30dAgo?: number;
+  historyPoints: number;
   currentPrice: number;
-  price30dAgo: number;
+  price30dAgo?: number;
   rating: number;
   deliveryDays: number;
   sellerScore: number;
