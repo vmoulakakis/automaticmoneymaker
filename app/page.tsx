@@ -37,22 +37,24 @@ export default async function MonitorPage() {
         <div>
           <div className="kicker">Autonomous supervisor</div>
           <h1>Demand intelligence, not another shop.</h1>
-          <p className="lead">The system continuously discovers AliExpress candidates, stores rolling market snapshots, forecasts 30/60/90-day demand, verifies EU origin, and only then promotes opportunities.</p>
+          <p className="lead">The system continuously discovers AliExpress candidates, stores rolling market snapshots, forecasts a 30/60/90-day relative demand index, verifies EU origin, and only then promotes opportunities.</p>
         </div>
-        <div className="note">Strict mode: <strong>EU warehouse verification required before PROMOTE</strong>.</div>
+        <div className="note">Strict mode: <strong>fresh EU warehouse verification + mature rolling history required before PROMOTE</strong>.</div>
       </section>
 
       <section className="grid stats">
         <div className="card"><div className="kicker">Catalog observed</div><div className="metric">{fmt(productCount)}</div></div>
-        <div className="card"><div className="kicker">EU verified</div><div className="metric good">{fmt(verifiedCount)}</div></div>
+        <div className="card"><div className="kicker">EU origin confirmed</div><div className="metric good">{fmt(verifiedCount)}</div></div>
         <div className="card"><div className="kicker">Current promote set</div><div className="metric good">{fmt(promoted)}</div></div>
         <div className="card"><div className="kicker">Last run</div><div className={`metric ${lastRun?.status === 'succeeded' ? 'good' : lastRun?.status === 'failed' ? 'bad' : 'warn'}`}>{lastRun?.status ?? 'not run'}</div></div>
       </section>
 
+      <div className="note">Forecast values are <strong>relative demand indices derived from AliExpress recent-sales snapshots</strong>, not guaranteed future unit sales. Confidence increases as the monitoring history matures.</div>
+
       <div className="section-title"><h2>Top opportunities</h2><span className="muted">Latest score per product</span></div>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Product</th><th>Score</th><th>Decision</th><th>EU stock</th><th>Price</th><th>30d</th><th>60d</th><th>90d</th><th>Confidence</th></tr></thead>
+          <thead><tr><th>Product</th><th>Score</th><th>Decision</th><th>EU stock</th><th>Price</th><th>30d index</th><th>60d index</th><th>90d index</th><th>Confidence</th></tr></thead>
           <tbody>
             {latest.length === 0 ? <tr><td colSpan={9} className="muted">No runs yet. Once Supabase and runtime secrets are connected, the supervisor will populate this view.</td></tr> : latest.map((row) => {
               const product = Array.isArray(row.products) ? row.products[0] : row.products;
@@ -65,7 +67,7 @@ export default async function MonitorPage() {
                 <td className="product">{product?.title ?? 'Unknown'}<div className="muted">#{product?.external_id}</div></td>
                 <td><strong>{fmt(row.total_score, 1)}</strong></td>
                 <td><span className={`badge ${String(row.recommended_action).toLowerCase()}`}>{row.recommended_action}</span></td>
-                <td>{product?.eu_stock_verified ? <span className="badge verified">{product.warehouse_country ?? 'EU'} verified</span> : <span className="muted">unverified</span>}</td>
+                <td>{product?.eu_stock_verified ? <span className="badge verified">{product.warehouse_country ?? 'EU'} confirmed</span> : <span className="muted">unverified</span>}</td>
                 <td>{product?.current_price ? `${fmt(product.current_price, 2)} ${product.currency ?? 'EUR'}` : '—'}</td>
                 <td>{fmt(byHorizon[30]?.forecast_demand)}</td>
                 <td>{fmt(byHorizon[60]?.forecast_demand)}</td>
