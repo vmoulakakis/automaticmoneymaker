@@ -11,10 +11,10 @@ const APP_TABLES = new Set([
   'system_config',
 ]);
 
-function withAutomaticMoneyMakerTables<T extends ReturnType<typeof createClient>>(client: T): T {
+function withAutomaticMoneyMakerTables(client: any): any {
   const originalFrom = client.from.bind(client);
 
-  (client as any).from = (relation: string) =>
+  client.from = (relation: string) =>
     originalFrom(APP_TABLES.has(relation) ? `amm_${relation}` : relation);
 
   return client;
