@@ -14,6 +14,33 @@ export type QueryInput = {
   shipToCountry?: string;
 };
 
+const REGION_ALIASES: Record<string, string[]> = {
+  CZ: ['Czechia', 'Czech Republic'],
+  NL: ['Netherlands', 'The Netherlands'],
+  DE: ['Germany'],
+  ES: ['Spain'],
+  FR: ['France'],
+  IT: ['Italy'],
+  PL: ['Poland'],
+  BE: ['Belgium'],
+  PT: ['Portugal'],
+  AT: ['Austria'],
+  HU: ['Hungary'],
+  RO: ['Romania'],
+  BG: ['Bulgaria'],
+  SK: ['Slovakia'],
+  SI: ['Slovenia'],
+  HR: ['Croatia'],
+  GR: ['Greece'],
+  IE: ['Ireland'],
+  SE: ['Sweden'],
+  FI: ['Finland'],
+  DK: ['Denmark'],
+  LT: ['Lithuania'],
+  LV: ['Latvia'],
+  EE: ['Estonia'],
+};
+
 function env(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`Missing environment variable: ${name}`);
@@ -33,6 +60,29 @@ function signTopRequest(params: Record<string, string>, secret: string): string 
     .join('');
 
   return createHmac('md5', secret).update(base, 'utf8').digest('hex').toUpperCase();
+}
+
+function normalizeRegion(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z]/g, '')
+    .toLowerCase();
+}
+
+function originMatchesCountry(countryCode: string, originName: string): boolean {
+  const code = countryCode.toUpperCase();
+  const aliases = new Set<string>([code, ...(REGION_ALIASES[code] ?? [])]);
+
+  try {
+    const displayName = new Intl.DisplayNames(['en'], { type: 'region' }).of(code);
+    if (displayName) aliases.add(displayName);
+  } catch {
+    // Static aliases above cover the configured EU markets even if Intl data is unavailable.
+  }
+
+  const normalizedOrigin = normalizeRegion(originName);
+  return [...aliases].some((candidate) => normalizeRegion(candidate) === normalizedOrigin);
 }
 
 async function callTopApi(method: string, businessParams: Record<string, string | undefined>) {
@@ -113,7 +163,8 @@ export async function verifyEuStock(
 ) {
   const attempts: Array<{ country: string; ok: boolean; error?: string }> = [];
 
-  for (const shipFromCountry of allowedCountries) {
+  for (const rawCountry of allowedCountries) {
+    const shipFromCountry = rawCountry.toUpperCase();
     try {
       const payload = await callTopApi('aliexpress.social.product.freight.query', {
         product_id: productId,
@@ -123,10 +174,11 @@ export async function verifyEuStock(
         currency: process.env.ALIEXPRESS_TARGET_CURRENCY ?? 'EUR',
       });
       const result = payload?.aliexpress_social_product_freight_query_response?.result ?? payload?.result;
-      const originName = result?.send_goods_country_full_name;
-      if (result && originName) {
+      const originName = String(result?.send_goods_country_full_name ?? '').trim();
+
+      if (result && originName && originMatchesCountry(shipFromCountry, originName)) {
         return {
-          verified: true,
+          verified: true as const,
           countryCode: shipFromCountry,
           countryName: originName,
           deliveryDate: result.delivery_date ?? null,
@@ -134,17 +186,22 @@ export async function verifyEuStock(
           attempts,
         };
       }
-      attempts.push({ country: shipFromCountry, ok: false, error: 'No origin returned' });
+
+      attempts.push({
+        country: shipFromCountry,
+        ok: false,
+        error: originName ? `Origin mismatch: API returned ${originName}` : 'No origin returned',
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       attempts.push({ country: shipFromCountry, ok: false, error: message });
       if (/permission|authorize|access/i.test(message)) {
-        return { verified: false, reason: 'FREIGHT_API_PERMISSION', attempts };
+        return { verified: false as const, reason: 'FREIGHT_API_PERMISSION', attempts };
       }
     }
   }
 
-  return { verified: false, reason: 'NO_EU_ORIGIN_CONFIRMED', attempts };
+  return { verified: false as const, reason: 'NO_EU_ORIGIN_CONFIRMED', attempts };
 }
 
 export function extractProducts(payload: any): any[] {
