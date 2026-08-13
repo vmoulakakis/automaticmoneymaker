@@ -11,9 +11,12 @@ type Candidate = {
   productId: string;
   dbId: string;
   signal: ProductSignal;
+  historySpanHours: number;
   forecasts: ReturnType<typeof forecast90Days>;
   score: ReturnType<typeof scoreOpportunity>;
   warehouseVerified: boolean;
+  warehouseVerificationFresh: boolean;
+  warehouseVerifiedAt?: string;
   warehouseCountry?: string;
 };
 
@@ -36,6 +39,12 @@ function getProductsFromPayload(payload: any) {
 function nearestOlderObservation(observations: any[], daysAgo: number) {
   const cutoff = Date.now() - daysAgo * 24 * 60 * 60 * 1000;
   return observations.find((row) => new Date(row.observed_at).getTime() <= cutoff);
+}
+
+function hoursSince(timestamp?: string | null) {
+  if (!timestamp) return Number.POSITIVE_INFINITY;
+  const time = new Date(timestamp).getTime();
+  return Number.isFinite(time) ? Math.max(0, (Date.now() - time) / 3_600_000) : Number.POSITIVE_INFINITY;
 }
 
 async function loadConfig(supabase: ReturnType<typeof createServerSupabase>): Promise<ConfigMap> {
@@ -96,6 +105,22 @@ export async function runAutonomousSupervisor() {
 
   try {
     const config = await loadConfig(supabase);
+
+    if (config.autonomous_mode === false) {
+      await supabase.from('agent_runs').update({
+        status: 'succeeded',
+        finished_at: new Date().toISOString(),
+        duration_ms: Date.now() - started,
+        metadata: { disabled_by_configuration: true },
+      }).eq('id', run.id);
+      return { runId: run.id, disabled: true, discovered: 0, evaluated: 0, promoted: 0, euVerified: 0, durationMs: Date.now() - started };
+    }
+
+    const minHistoryPoints = Math.max(2, Number(config.min_history_points_for_promotion ?? 4));
+    const minHistorySpanHours = Math.max(0, Number(config.min_history_span_hours_for_promotion ?? 24));
+    const verificationTtlHours = Math.max(1, Number(config.eu_verification_ttl_hours ?? 24));
+    const watchThreshold = Number(config.watch_threshold ?? 55);
+
     const rawProducts = await discover(config);
 
     const categoryCounts = new Map<string, number>();
@@ -147,7 +172,7 @@ export async function runAutonomousSupervisor() {
           updated_at: new Date().toISOString(),
           raw,
         }, { onConflict: 'external_id' })
-        .select('id,eu_stock_verified,warehouse_country')
+        .select('id,eu_stock_verified,eu_stock_verified_at,warehouse_country')
         .single();
       if (productError) throw productError;
 
@@ -161,6 +186,8 @@ export async function runAutonomousSupervisor() {
 
       const obs7 = nearestOlderObservation(previous ?? [], 7);
       const obs30 = nearestOlderObservation(previous ?? [], 30);
+      const oldestObservation = (previous ?? [])[(previous?.length ?? 0) - 1];
+      const historySpanHours = oldestObservation ? hoursSince(oldestObservation.observed_at) : 0;
 
       const { error: observationError } = await supabase.from('product_observations').insert({
         product_id: product.id,
@@ -207,26 +234,34 @@ export async function runAutonomousSupervisor() {
         seasonality_score: 0.5,
         trend_score: trendScore,
         conversion_signal: null,
-        feature_vector: signal,
-        model_version: 'features-v1.1',
+        feature_vector: { ...signal, historySpanHours },
+        model_version: 'features-v1.2',
       });
 
       const forecasts = forecast90Days(signal);
       const score = scoreOpportunity(signal, forecasts, {
         weights: config.score_weights,
         promotionThreshold: Number(config.promotion_threshold ?? 72),
-        watchThreshold: Number(config.watch_threshold ?? 55),
+        watchThreshold,
         minConfidence: Number(config.min_confidence ?? 0.55),
         maxDeliveryDays: Number(config.max_delivery_days ?? 10),
+        minHistoryPoints,
       });
+
+      const warehouseVerified = Boolean(product.eu_stock_verified);
+      const warehouseVerificationFresh = warehouseVerified && hoursSince(product.eu_stock_verified_at) <= verificationTtlHours;
+
       candidates.push({
         raw,
         productId: externalId,
         dbId: product.id,
         signal,
+        historySpanHours,
         forecasts,
         score,
-        warehouseVerified: Boolean(product.eu_stock_verified),
+        warehouseVerified,
+        warehouseVerificationFresh,
+        warehouseVerifiedAt: product.eu_stock_verified_at ?? undefined,
         warehouseCountry: product.warehouse_country ?? undefined,
       });
     }
@@ -237,19 +272,26 @@ export async function runAutonomousSupervisor() {
       : ['ES', 'FR', 'DE', 'IT', 'PL', 'CZ', 'BE', 'NL'];
 
     const verificationQueue = [...candidates]
-      .filter((candidate) => !candidate.warehouseVerified)
+      .filter((candidate) =>
+        !candidate.warehouseVerificationFresh
+        && candidate.signal.historyPoints >= minHistoryPoints
+        && candidate.historySpanHours >= minHistorySpanHours
+        && candidate.score.totalScore >= watchThreshold,
+      )
       .sort((a, b) => b.score.totalScore - a.score.totalScore)
       .slice(0, verificationLimit);
 
     for (const candidate of verificationQueue) {
       const verification = await verifyEuStock(candidate.productId, allowedWarehouses);
       candidate.warehouseVerified = verification.verified;
+      candidate.warehouseVerificationFresh = verification.verified;
       candidate.warehouseCountry = verification.verified ? verification.countryCode : undefined;
+      candidate.warehouseVerifiedAt = verification.verified ? new Date().toISOString() : undefined;
 
       await supabase.from('products').update({
         eu_stock_verified: verification.verified,
-        eu_stock_verified_at: verification.verified ? new Date().toISOString() : null,
-        eu_stock_verification_reason: verification.verified ? 'FREIGHT_API_CONFIRMED' : verification.reason,
+        eu_stock_verified_at: candidate.warehouseVerifiedAt ?? null,
+        eu_stock_verification_reason: verification.verified ? 'FREIGHT_API_STRICT_ORIGIN_CONFIRMED' : verification.reason,
         warehouse_country: verification.verified ? verification.countryCode : null,
         updated_at: new Date().toISOString(),
       }).eq('id', candidate.dbId);
@@ -267,10 +309,11 @@ export async function runAutonomousSupervisor() {
           lower_bound: forecast.lowerBound,
           upper_bound: forecast.upperBound,
           confidence: forecast.confidence,
-          model_version: 'rolling-volume-v1.1',
-          feature_snapshot: candidate.signal,
+          model_version: 'rolling-volume-v1.2',
+          feature_snapshot: { ...candidate.signal, historySpanHours: candidate.historySpanHours },
           rationale: {
-            source: 'AliExpress lastest_volume snapshots',
+            source: 'AliExpress lastest_volume rolling snapshots',
+            demand_is_proxy_not_direct_sales_forecast: true,
             neutral_seasonality_until_enriched: true,
           },
         });
@@ -278,10 +321,17 @@ export async function runAutonomousSupervisor() {
 
       let action = candidate.score.recommendedAction;
       const reasonCodes = [...candidate.score.reasonCodes];
-      if (requireVerified && !candidate.warehouseVerified && action === 'PROMOTE') {
+
+      if (candidate.historySpanHours < minHistorySpanHours && action === 'PROMOTE') {
         action = 'WATCH';
-        reasonCodes.push('EU_STOCK_NOT_VERIFIED');
+        reasonCodes.push('INSUFFICIENT_HISTORY_SPAN');
       }
+
+      if (requireVerified && !candidate.warehouseVerificationFresh && action === 'PROMOTE') {
+        action = 'WATCH';
+        reasonCodes.push(candidate.warehouseVerified ? 'EU_STOCK_VERIFICATION_STALE' : 'EU_STOCK_NOT_VERIFIED');
+      }
+
       if (action === 'PROMOTE') promoted += 1;
 
       await supabase.from('opportunity_scores').insert({
@@ -298,10 +348,13 @@ export async function runAutonomousSupervisor() {
         explanation: {
           reason_codes: reasonCodes,
           eu_stock_verified: candidate.warehouseVerified,
+          eu_stock_verification_fresh: candidate.warehouseVerificationFresh,
           warehouse_country: candidate.warehouseCountry ?? null,
+          history_points: candidate.signal.historyPoints,
+          history_span_hours: candidate.historySpanHours,
           components: candidate.score.components,
         },
-        scoring_version: 'score-v1.2',
+        scoring_version: 'score-v1.3',
       });
 
       await supabase.from('agent_decisions').insert({
@@ -314,7 +367,9 @@ export async function runAutonomousSupervisor() {
         evidence: {
           total_score: candidate.score.totalScore,
           forecasts: candidate.forecasts,
+          history_span_hours: candidate.historySpanHours,
           eu_stock_verified: candidate.warehouseVerified,
+          eu_stock_verification_fresh: candidate.warehouseVerificationFresh,
         },
       });
     }
@@ -328,8 +383,11 @@ export async function runAutonomousSupervisor() {
       output_count: candidates.length,
       metadata: {
         promoted,
-        verified_eu_stock: candidates.filter((c) => c.warehouseVerified).length,
+        verified_eu_stock: candidates.filter((c) => c.warehouseVerificationFresh).length,
         verification_attempted: verificationQueue.length,
+        min_history_points: minHistoryPoints,
+        min_history_span_hours: minHistorySpanHours,
+        verification_ttl_hours: verificationTtlHours,
       },
     }).eq('id', run.id);
 
@@ -338,7 +396,7 @@ export async function runAutonomousSupervisor() {
       discovered: rawProducts.length,
       evaluated: candidates.length,
       promoted,
-      euVerified: candidates.filter((c) => c.warehouseVerified).length,
+      euVerified: candidates.filter((c) => c.warehouseVerificationFresh).length,
       durationMs,
     };
   } catch (error) {
