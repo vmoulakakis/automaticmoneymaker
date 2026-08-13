@@ -13,7 +13,7 @@ export default async function MonitorPage() {
   const [{ data: scores }, { data: runs }, { count: verifiedCount }, { count: productCount }] = await Promise.all([
     supabase
       .from('opportunity_scores')
-      .select('id,total_score,recommended_action,scored_at,explanation,products!inner(id,title,external_id,current_price,currency,warehouse_country,eu_stock_verified,promotion_link),forecasts:products!inner(forecasts(horizon_days,forecast_demand,confidence,generated_at))')
+      .select('id,total_score,recommended_action,scored_at,explanation,products!inner(id,title,external_id,current_price,currency,warehouse_country,eu_stock_verified,promotion_link,forecasts(horizon_days,forecast_demand,confidence,generated_at))')
       .order('scored_at', { ascending: false })
       .order('total_score', { ascending: false })
       .limit(30),
