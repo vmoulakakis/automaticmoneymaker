@@ -12,6 +12,12 @@ Autonomous product-intelligence and 90-day demand forecasting system for AliExpr
 6. Persist every signal, forecast, decision and run in Supabase for auditability.
 7. Monitor health and tune thresholds from the configuration dashboard.
 
+## Shared Supabase isolation
+
+The app can safely share a Supabase project with unrelated applications. Its logical table names are mapped to an isolated `amm_` namespace in `public`, for example `amm_products`, `amm_forecasts`, `amm_agent_runs`, and `amm_system_config`.
+
+No existing unrelated table is renamed, modified, or queried by the application. RLS is enabled on the `amm_*` tables and autonomous server-side workers are expected to use the service-role key.
+
 ## Design rule
 
 LLMs may explain and coordinate decisions, but numeric demand forecasts are produced by deterministic/statistical logic from stored signals. No secret is committed to GitHub.
@@ -24,4 +30,4 @@ LLMs may explain and coordinate decisions, but numeric demand forecasts are prod
 - AliExpress Affiliate API adapter
 - Provider-agnostic optional LLM reasoning layer
 
-See `docs/ARCHITECTURE.md` and `supabase/migrations/001_agentic_intelligence.sql`.
+See `docs/ARCHITECTURE.md` and `supabase/migrations/004_shared_database_isolation.sql`.
