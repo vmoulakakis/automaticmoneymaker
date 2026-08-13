@@ -11,11 +11,25 @@ export const defaultWeights: OpportunityWeights = {
   confidence: 0.1,
 };
 
+export type ScoringOptions = {
+  weights?: OpportunityWeights;
+  promotionThreshold?: number;
+  watchThreshold?: number;
+  minConfidence?: number;
+  maxDeliveryDays?: number;
+};
+
 export function scoreOpportunity(
   signal: ProductSignal,
   forecasts: ForecastPoint[],
-  weights: OpportunityWeights = defaultWeights,
+  options: ScoringOptions = {},
 ): OpportunityResult {
+  const weights = options.weights ?? defaultWeights;
+  const promotionThreshold = options.promotionThreshold ?? 72;
+  const watchThreshold = options.watchThreshold ?? 55;
+  const minConfidence = options.minConfidence ?? 0.55;
+  const maxDeliveryDays = options.maxDeliveryDays ?? 10;
+
   const f30 = forecasts.find((f) => f.horizonDays === 30)!;
   const f90 = forecasts.find((f) => f.horizonDays === 90)!;
   const baseline30 = Math.max(1, signal.currentDemand30);
@@ -30,7 +44,7 @@ export function scoreOpportunity(
   let riskPenalty = 0;
   const reasonCodes: string[] = [];
 
-  if (signal.deliveryDays > 10) {
+  if (signal.deliveryDays > maxDeliveryDays) {
     riskPenalty += 18;
     reasonCodes.push('SLOW_DELIVERY');
   }
@@ -38,7 +52,7 @@ export function scoreOpportunity(
     riskPenalty += 12;
     reasonCodes.push('LOW_RATING');
   }
-  if (f30.confidence < 0.55) {
+  if (f30.confidence < minConfidence) {
     riskPenalty += 14;
     reasonCodes.push('LOW_FORECAST_CONFIDENCE');
   }
@@ -60,7 +74,11 @@ export function scoreOpportunity(
     confidence * weights.confidence;
 
   const totalScore = Number(clamp(weighted - riskPenalty).toFixed(2));
-  const recommendedAction = totalScore >= 72 && riskPenalty < 25 ? 'PROMOTE' : totalScore >= 55 ? 'WATCH' : 'REJECT';
+  const recommendedAction = totalScore >= promotionThreshold && riskPenalty < 25
+    ? 'PROMOTE'
+    : totalScore >= watchThreshold
+      ? 'WATCH'
+      : 'REJECT';
 
   if (recommendedAction === 'PROMOTE') reasonCodes.push('HIGH_OPPORTUNITY_SCORE');
   if (signal.trendScore >= 0.7) reasonCodes.push('TREND_ACCELERATION');
