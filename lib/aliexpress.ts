@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto';
 
 const TOP_ENDPOINT = 'https://eco.taobao.com/router/rest';
 
-type QueryInput = {
+export type QueryInput = {
   keywords?: string;
   categoryIds?: string[];
   pageNo?: number;
@@ -67,7 +67,9 @@ async function callTopApi(method: string, businessParams: Record<string, string 
 
   const json = await response.json();
   if (!response.ok || json.error_response) {
-    throw new Error(`AliExpress API error: ${JSON.stringify(json.error_response ?? json)}`);
+    const error = new Error(`AliExpress API error: ${JSON.stringify(json.error_response ?? json)}`);
+    (error as Error & { payload?: unknown }).payload = json;
+    throw error;
   }
   return json;
 }
@@ -102,6 +104,47 @@ export async function queryHotProducts(input: QueryInput = {}) {
     delivery_days: input.deliveryDays,
     tracking_id: process.env.ALIEXPRESS_TRACKING_ID,
   });
+}
+
+export async function verifyEuStock(
+  productId: string,
+  allowedCountries = ['ES', 'FR', 'DE', 'IT', 'PL', 'CZ', 'BE', 'NL'],
+  shipToCountry = process.env.ALIEXPRESS_TARGET_COUNTRY ?? 'GR',
+) {
+  const attempts: Array<{ country: string; ok: boolean; error?: string }> = [];
+
+  for (const shipFromCountry of allowedCountries) {
+    try {
+      const payload = await callTopApi('aliexpress.social.product.freight.query', {
+        product_id: productId,
+        quantity: '1',
+        ship_from_country: shipFromCountry,
+        ship_to_country: shipToCountry,
+        currency: process.env.ALIEXPRESS_TARGET_CURRENCY ?? 'EUR',
+      });
+      const result = payload?.aliexpress_social_product_freight_query_response?.result ?? payload?.result;
+      const originName = result?.send_goods_country_full_name;
+      if (result && originName) {
+        return {
+          verified: true,
+          countryCode: shipFromCountry,
+          countryName: originName,
+          deliveryDate: result.delivery_date ?? null,
+          carrier: result.company ?? null,
+          attempts,
+        };
+      }
+      attempts.push({ country: shipFromCountry, ok: false, error: 'No origin returned' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      attempts.push({ country: shipFromCountry, ok: false, error: message });
+      if (/permission|authorize|access/i.test(message)) {
+        return { verified: false, reason: 'FREIGHT_API_PERMISSION', attempts };
+      }
+    }
+  }
+
+  return { verified: false, reason: 'NO_EU_ORIGIN_CONFIRMED', attempts };
 }
 
 export function extractProducts(payload: any): any[] {
