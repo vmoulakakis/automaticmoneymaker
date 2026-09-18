@@ -1,5 +1,9 @@
 # EU Stock Intelligence
 
+> **Architecture status (2026-09-18):** This repository is an affiliate analytics/experimentation consumer. It is **not** the canonical product, merchant, demand or AI-ranking source of truth.
+>
+> Canonical production intelligence lives in `vmoulakakis/Socialmarket` and its approved Supabase API/public views. New integrations must consume validated Socialmarket records and preserve exact affiliate tracking URLs. The local `amm_*` tables are limited to repo-specific observations, forecasts, experiments and audit state; they must not redefine canonical merchant/product/demand facts.
+
 Autonomous product-intelligence and 90-day demand forecasting system for AliExpress EU-stock opportunities.
 
 ## Core loop
